@@ -15,6 +15,7 @@ module sellable_token_objects::instant_sale {
     const E_ALREADY_OWNER: u64 = 6;
     const E_SALE_DISABLED: u64 = 7;
     const E_NOT_ENOUGH_BALANCE: u64 = 8;
+    const E_OWNER_CHANGED: u64 = 9;
 
     #[resource_group_member(group = object::ObjectGroup)]
     struct TransferConfig has key {
@@ -23,8 +24,8 @@ module sellable_token_objects::instant_sale {
 
     #[resource_group_member(group = object::ObjectGroup)]
     struct Sale<phantom TCoin> has key {
-        price: u64,
-        is_active: bool
+        lister: Option<address>,
+        price: u64
     }
 
     public fun init_config<T: key>(
@@ -54,8 +55,8 @@ module sellable_token_objects::instant_sale {
         move_to(
             &obj_signer,
             Sale<TCoin>{
-                price: 0,
-                is_active: false
+                lister: option::none(),
+                price: 0
             }
         );
     }
@@ -69,19 +70,17 @@ module sellable_token_objects::instant_sale {
 
     public fun start_sale<T: key, TCoin>(owner: &signer, object: Object<T>, price: u64)
     acquires Sale {
-        assert!(
-            object::is_owner(object, signer::address_of(owner)),
-            error::permission_denied(E_NOT_OWNER)
-        );
+        let owner_addr = signer::address_of(owner);
+        assert!(object::is_owner(object, owner_addr), error::permission_denied(E_NOT_OWNER));
         assert!(
             0 < price && price < 0xffff_ffff_ffff_ffff,
             error::invalid_argument(E_INVALID_PRICE)
         );
 
         let sale = borrow_global_mut<Sale<TCoin>>(object::object_address(&object));
-        assert!(!sale.is_active, error::invalid_argument(E_ALREADY_FOR_SALE));
+        assert!(option::is_none(&sale.lister), error::invalid_argument(E_ALREADY_FOR_SALE));
+        sale.lister = option::some(owner_addr); 
         sale.price = price;
-        sale.is_active = true;
     }
 
     public fun set_price<T: key, TCoin>(owner: &signer, object: Object<T>, price: u64)
@@ -96,7 +95,7 @@ module sellable_token_objects::instant_sale {
         );
 
         let sale = borrow_global_mut<Sale<TCoin>>(object::object_address(&object));
-        assert!(sale.is_active, error::invalid_argument(E_NOT_FOR_SALE));
+        assert!(option::is_some(&sale.lister), error::invalid_argument(E_NOT_FOR_SALE));
         sale.price = price;
     }
 
@@ -108,8 +107,8 @@ module sellable_token_objects::instant_sale {
         );       
 
         let sale = borrow_global_mut<Sale<TCoin>>(object::object_address(&object));
+        sale.lister = option::none();
         sale.price = 0;
-        sale.is_active = false;
     }
 
     public fun flash_buy<T: key, TCoin>(buyer: &signer, object: Object<T>)
@@ -124,18 +123,16 @@ module sellable_token_objects::instant_sale {
         );
 
         let sale = borrow_global_mut<Sale<TCoin>>(obj_addr);
-        assert!(sale.is_active && sale.price > 0, error::unavailable(E_NOT_FOR_SALE));
+        let owner = object::owner(object);
+        assert!(option::is_some(&sale.lister), error::invalid_argument(E_NOT_FOR_SALE));
+        assert!(option::extract(&mut sale.lister) == owner, error::internal(E_OWNER_CHANGED));
         assert!(
             coin::balance<TCoin>(buyer_addr) >= sale.price, 
             error::invalid_argument(E_NOT_ENOUGH_BALANCE)
         );
 
-        let price = sale.price;
+        let coin = coin::withdraw<TCoin>(buyer, sale.price);
         sale.price = 0;
-        sale.is_active = false;
-
-        let owner = object::owner(object);
-        let coin = coin::withdraw<TCoin>(buyer, price);
         let linear_transfer = object::generate_linear_transfer_ref(option::borrow(&transfer_config.transfer_ref));
         object::transfer_with_ref(linear_transfer, buyer_addr);
         coin::deposit(owner, coin);
