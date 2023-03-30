@@ -138,10 +138,251 @@ module sellable_token_objects::instant_sale {
         sale.price = 0;
 
         let transfer_config = borrow_global<TransferConfig>(obj_addr);
-        let linear_transfer = object::generate_linear_transfer_ref(
-            components_common::transfer_ref(option::borrow(&transfer_config.transfer_key))
-        );
+        let linear_transfer = components_common::generate_linear_transfer_ref(option::borrow(&transfer_config.transfer_key));
         object::transfer_with_ref(linear_transfer, buyer_addr);
         coin::deposit(owner, coin);
+    }
+
+    #[test_only]
+    use std::string::utf8;
+    #[test_only]
+    use aptos_token_objects::collection;
+    #[test_only]
+    use aptos_framework::coin::FakeMoney;
+    #[test_only]
+    use aptos_framework::account;
+
+    #[test_only]
+    struct FreePizzaPass has key {}
+    #[test_only]
+    struct AnotherCoin {}
+
+    #[test_only]
+    fun setup_test(account_1: &signer, account_2: &signer, framework: &signer)
+    : (Object<FreePizzaPass>, ExtendRef, TransferKey) {
+        account::create_account_for_test(signer::address_of(account_1));
+        account::create_account_for_test(signer::address_of(account_2));
+        account::create_account_for_test(signer::address_of(framework));
+        coin::create_fake_money(framework, framework, 200);
+        coin::register<FakeMoney>(account_1);
+        coin::register<FakeMoney>(account_2);
+        coin::transfer<FakeMoney>(framework, signer::address_of(account_1), 100);
+        coin::transfer<FakeMoney>(framework, signer::address_of(account_2), 100);
+
+        _ = collection::create_untracked_collection(
+            account_1,
+            utf8(b"collection1 description"),
+            utf8(b"collection1"),
+            option::none(),
+            utf8(b"collection1 uri"),
+        );
+        let cctor_1 = token::create(
+            account_1,
+            utf8(b"collection1"),
+            utf8(b"description1"),
+            utf8(b"name1"),
+            option::none(),
+            utf8(b"uri1")
+        );
+        move_to(&object::generate_signer(&cctor_1), FreePizzaPass{});
+        let obj_1 = object::object_from_constructor_ref(&cctor_1);
+        let ex_1 = object::generate_extend_ref(&cctor_1);
+
+        init_for_coin_type<FreePizzaPass, FakeMoney>(&ex_1, obj_1, utf8(b"collection1"), utf8(b"name1"));
+        (obj_1, ex_1, components_common::create_transfer_key(&cctor_1))
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    fun test_for_another_coin(account_1: &signer, account_2: &signer, framework: &signer) {
+        let (obj, ex, key) = setup_test(account_1, account_2, framework);
+        init_for_coin_type<FreePizzaPass, AnotherCoin>(&ex, obj, utf8(b"collection1"), utf8(b"name1"));
+        components_common::destroy_for_test(key);
+        assert!(exists<Sale<AnotherCoin>>(object::object_address(&obj)), 0);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure(abort_code = 65537, location = Self)]
+    fun test_fail_init_wrong_collection(account_1: &signer, account_2: &signer, framework: &signer) {
+        let (obj, ex, key) = setup_test(account_1, account_2, framework);
+        init_for_coin_type<FreePizzaPass, AnotherCoin>(&ex, obj, utf8(b"collection-bad"), utf8(b"name1"));
+        components_common::destroy_for_test(key);
+        assert!(exists<Sale<AnotherCoin>>(object::object_address(&obj)), 0);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure(abort_code = 65537, location = Self)]
+    fun test_fail_init_wrong_token(account_1: &signer, account_2: &signer, framework: &signer) {
+        let (obj, ex, key) = setup_test(account_1, account_2, framework);
+        init_for_coin_type<FreePizzaPass, AnotherCoin>(&ex, obj, utf8(b"collection1"), utf8(b"name-bad"));
+        components_common::destroy_for_test(key);
+        assert!(exists<Sale<AnotherCoin>>(object::object_address(&obj)), 0);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure(abort_code = 327682, location = Self)]
+    fun test_fail_start_sale_not_owner(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        start_sale<FreePizzaPass, FakeMoney>(account_2, key, obj, 1);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure(abort_code = 65540, location = Self)]
+    fun test_fail_start_sale_zero(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 0);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure(abort_code = 65540, location = Self)]
+    fun test_fail_start_sale_over(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 0xffffffff_ffffffff);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    fun test(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        let obj_addr = object::object_address(&obj);
+        start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
+        {
+            let sale = borrow_global<Sale<FakeMoney>>(obj_addr);
+            assert!(sale.price == 10, 0);
+            assert!(*option::borrow(&sale.lister) == @0x123, 1);
+            let transfer_config = borrow_global<TransferConfig>(obj_addr);
+            assert!(option::is_some(&transfer_config.transfer_key), 2);
+        };
+
+        flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
+        {
+            assert!(object::is_owner(obj, @0x234), 3);
+            assert!(coin::balance<FakeMoney>(@0x234) == 90, 4);
+            assert!(coin::balance<FakeMoney>(@0x123) == 110, 5);
+
+            let sale = borrow_global<Sale<FakeMoney>>(obj_addr);
+            assert!(sale.price == 0, 6);
+            assert!(option::is_none(&sale.lister), 7);
+            let transfer_config = borrow_global<TransferConfig>(obj_addr);
+            assert!(option::is_some(&transfer_config.transfer_key), 8);
+        };
+
+        let ret = freeze_sale<FreePizzaPass, FakeMoney>(account_2, obj);
+        components_common::destroy_for_test(ret);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    fun test_set_close(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        let obj_addr = object::object_address(&obj);
+        start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
+        
+        set_price<FreePizzaPass, FakeMoney>(account_1, obj, 20);
+        {
+            let sale = borrow_global<Sale<FakeMoney>>(obj_addr);
+            assert!(sale.price == 20, 0);
+            assert!(*option::borrow(&sale.lister) == @0x123, 1);
+            let transfer_config = borrow_global<TransferConfig>(obj_addr);
+            assert!(option::is_some(&transfer_config.transfer_key), 2);
+        };
+
+        close<FreePizzaPass, FakeMoney>(account_1, obj);
+        {
+            let sale = borrow_global<Sale<FakeMoney>>(obj_addr);
+            assert!(sale.price == 0, 6);
+            assert!(option::is_none(&sale.lister), 7);
+            let transfer_config = borrow_global<TransferConfig>(obj_addr);
+            assert!(option::is_some(&transfer_config.transfer_key), 8);    
+        }
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure(abort_code = 327682, location = Self)]
+    fun test_fail_set_not_owner(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
+        set_price<FreePizzaPass, FakeMoney>(account_2, obj, 20);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure(abort_code = 65539, location = Self)]
+    fun test_fail_set_not_started(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        set_price<FreePizzaPass, FakeMoney>(account_1, obj, 20);
+        components_common::destroy_for_test(key);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure]
+    fun test_fail_freeze_not_started(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        let ret = freeze_sale<FreePizzaPass, FakeMoney>(account_1, obj);
+        
+        components_common::destroy_for_test(key);
+        components_common::destroy_for_test(ret);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure(abort_code = 327682, location = Self)]
+    fun test_fail_close_not_owner(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
+        close<FreePizzaPass, FakeMoney>(account_2, obj);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure(abort_code = 327685, location = Self)]
+    fun test_fail_buy_self(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
+        flash_buy<FreePizzaPass, FakeMoney>(account_1, obj);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure]
+    fun test_fail_buy_shortage(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 110);
+        flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure(abort_code = 327685, location = Self)]
+    fun test_fail_buy_twice(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
+        flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
+        flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure]
+    fun test_fail_buy_closed(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
+        close<FreePizzaPass, FakeMoney>(account_1, obj);
+        flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    #[expected_failure]
+    fun test_fail_buy_freezed(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
+        let ret = freeze_sale<FreePizzaPass, FakeMoney>(account_1, obj);
+        flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
+        components_common::destroy_for_test(ret);
     }
 }
