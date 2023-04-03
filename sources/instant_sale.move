@@ -92,7 +92,7 @@ module sellable_token_objects::instant_sale {
         option::fill(&mut transfer_config.transfer_key, transfer_key);
     }
 
-    public fun set_price<T: key, TCoin>(owner: &signer, object: Object<T>, price: u64)
+    public entry fun set_price<T: key, TCoin>(owner: &signer, object: Object<T>, price: u64)
     acquires Sale {
         assert!(
             object::is_owner(object, signer::address_of(owner)),
@@ -108,7 +108,7 @@ module sellable_token_objects::instant_sale {
         sale.price = price;
     }
 
-    public fun close<T: key, TCoin>(owner: &signer, object: Object<T>)
+    public entry fun close<T: key, TCoin>(owner: &signer, object: Object<T>)
     acquires Sale {
         assert!(
             object::is_owner(object, signer::address_of(owner)),
@@ -127,7 +127,7 @@ module sellable_token_objects::instant_sale {
         option::extract(&mut config.transfer_key)
     }
 
-    public fun flash_buy<T: key, TCoin>(buyer: &signer, object: Object<T>)
+    public entry fun flash_buy<T: key, TCoin>(buyer: &signer, object: Object<T>)
     acquires Sale, TransferConfig {
         let buyer_addr = signer::address_of(buyer);
         assert!(!object::is_owner(object, buyer_addr), error::permission_denied(E_ALREADY_OWNER));
@@ -196,7 +196,7 @@ module sellable_token_objects::instant_sale {
         let ex_1 = object::generate_extend_ref(&cctor_1);
 
         init_for_coin_type<FreePizzaPass, FakeMoney>(&ex_1, obj_1, utf8(b"collection1"), utf8(b"name1"));
-        (obj_1, ex_1, components_common::create_transfer_key(&cctor_1))
+        (obj_1, ex_1, components_common::create_transfer_key(cctor_1))
     }
 
     #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
@@ -230,6 +230,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_start_sale_not_owner(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_2, key, obj, 1);
     }
 
@@ -238,6 +239,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_start_sale_zero(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 0);
     }
 
@@ -246,6 +248,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_start_sale_over(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 0xffffffff_ffffffff);
     }
 
@@ -254,6 +257,7 @@ module sellable_token_objects::instant_sale {
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
         let obj_addr = object::object_address(&obj);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
         {
             let sale = borrow_global<Sale<FakeMoney>>(obj_addr);
@@ -285,6 +289,7 @@ module sellable_token_objects::instant_sale {
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
         let obj_addr = object::object_address(&obj);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
         
         set_price<FreePizzaPass, FakeMoney>(account_1, obj, 20);
@@ -311,6 +316,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_set_not_owner(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
         set_price<FreePizzaPass, FakeMoney>(account_2, obj, 20);
     }
@@ -320,6 +326,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_set_not_started(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         set_price<FreePizzaPass, FakeMoney>(account_1, obj, 20);
         components_common::destroy_for_test(key);
     }
@@ -329,6 +336,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_freeze_not_started(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         let ret = freeze_sale<FreePizzaPass, FakeMoney>(account_1, obj);
         
         components_common::destroy_for_test(key);
@@ -340,6 +348,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_close_not_owner(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
         close<FreePizzaPass, FakeMoney>(account_2, obj);
     }
@@ -349,6 +358,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_buy_self(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
         flash_buy<FreePizzaPass, FakeMoney>(account_1, obj);
     }
@@ -358,6 +368,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_buy_shortage(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 110);
         flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
     }
@@ -367,6 +378,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_buy_twice(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
         flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
         flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
@@ -377,6 +389,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_buy_closed(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
         close<FreePizzaPass, FakeMoney>(account_1, obj);
         flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
@@ -387,6 +400,7 @@ module sellable_token_objects::instant_sale {
     fun test_fail_buy_freezed(account_1: &signer, account_2: &signer, framework: &signer)
     acquires Sale, TransferConfig {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
+        components_common::disable_transfer(&mut key);
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
         let ret = freeze_sale<FreePizzaPass, FakeMoney>(account_1, obj);
         flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
@@ -399,6 +413,7 @@ module sellable_token_objects::instant_sale {
         let (obj, _, key) = setup_test(account_1, account_2, framework);
         let obj_addr = object::object_address(&obj);
         object::transfer(account_1, obj, @0x234);
+        components_common::disable_transfer(&mut key);
         
         start_sale<FreePizzaPass, FakeMoney>(account_2, key, obj, 10);
         {
