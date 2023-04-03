@@ -7,6 +7,7 @@ module sellable_token_objects::instant_sale {
     use aptos_framework::object::{Self, Object, ExtendRef};
     use aptos_token_objects::token;
     use components_common::components_common::{Self, ComponentGroup, TransferKey};
+    use components_common::royalty_utils;
 
     const E_NOT_TOKEN: u64 = 1;
     const E_NOT_OWNER: u64 = 2;
@@ -15,6 +16,7 @@ module sellable_token_objects::instant_sale {
     const E_ALREADY_OWNER: u64 = 5;
     const E_OWNER_CHANGED: u64 = 6;
     const E_OBJECT_REF_NOT_MATCH: u64 = 7;
+    const E_EMPTY_COIN: u64 = 8;
 
     #[resource_group_member(group = ComponentGroup)]
     struct TransferConfig has key {
@@ -137,6 +139,9 @@ module sellable_token_objects::instant_sale {
         let coin = coin::withdraw<TCoin>(buyer, sale.price);
         sale.price = 0;
 
+        royalty_utils::execute_royalty<T, TCoin>(&mut coin, object);
+        assert!(coin::value(&coin) > 0, error::resource_exhausted(E_EMPTY_COIN));
+
         let transfer_config = borrow_global<TransferConfig>(obj_addr);
         let linear_transfer = components_common::generate_linear_transfer_ref(option::borrow(&transfer_config.transfer_key));
         object::transfer_with_ref(linear_transfer, buyer_addr);
@@ -147,6 +152,8 @@ module sellable_token_objects::instant_sale {
     use std::string::utf8;
     #[test_only]
     use aptos_token_objects::collection;
+    #[test_only]
+    use aptos_token_objects::royalty;
     #[test_only]
     use aptos_framework::coin::FakeMoney;
     #[test_only]
@@ -181,7 +188,7 @@ module sellable_token_objects::instant_sale {
             utf8(b"collection1"),
             utf8(b"description1"),
             utf8(b"name1"),
-            option::none(),
+            option::some(royalty::create(10, 100, signer::address_of(account_1))),
             utf8(b"uri1")
         );
         move_to(&object::generate_signer(&cctor_1), FreePizzaPass{});
@@ -383,6 +390,39 @@ module sellable_token_objects::instant_sale {
         start_sale<FreePizzaPass, FakeMoney>(account_1, key, obj, 10);
         let ret = freeze_sale<FreePizzaPass, FakeMoney>(account_1, obj);
         flash_buy<FreePizzaPass, FakeMoney>(account_2, obj);
+        components_common::destroy_for_test(ret);
+    }
+
+    #[test(account_1 = @0x123, account_2 = @0x234, framework = @0x1)]
+    fun test_royalty(account_1: &signer, account_2: &signer, framework: &signer)
+    acquires Sale, TransferConfig {
+        let (obj, _, key) = setup_test(account_1, account_2, framework);
+        let obj_addr = object::object_address(&obj);
+        object::transfer(account_1, obj, @0x234);
+        
+        start_sale<FreePizzaPass, FakeMoney>(account_2, key, obj, 10);
+        {
+            let sale = borrow_global<Sale<FakeMoney>>(obj_addr);
+            assert!(sale.price == 10, 0);
+            assert!(*option::borrow(&sale.lister) == @0x234, 1);
+            let transfer_config = borrow_global<TransferConfig>(obj_addr);
+            assert!(option::is_some(&transfer_config.transfer_key), 2);
+        };
+
+        flash_buy<FreePizzaPass, FakeMoney>(account_1, obj);
+        {
+            assert!(object::is_owner(obj, @0x123), 3);
+            assert!(coin::balance<FakeMoney>(@0x234) == 109, 4);
+            assert!(coin::balance<FakeMoney>(@0x123) == 91, 5);
+
+            let sale = borrow_global<Sale<FakeMoney>>(obj_addr);
+            assert!(sale.price == 0, 6);
+            assert!(option::is_none(&sale.lister), 7);
+            let transfer_config = borrow_global<TransferConfig>(obj_addr);
+            assert!(option::is_some(&transfer_config.transfer_key), 8);
+        };
+
+        let ret = freeze_sale<FreePizzaPass, FakeMoney>(account_1, obj);
         components_common::destroy_for_test(ret);
     }
 }
