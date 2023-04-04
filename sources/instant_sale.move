@@ -8,6 +8,7 @@ module sellable_token_objects::instant_sale {
     use aptos_token_objects::token;
     use components_common::components_common::{Self, ComponentGroup, TransferKey};
     use components_common::royalty_utils;
+    use components_common::token_objects_store;
 
     const E_NOT_TOKEN: u64 = 1;
     const E_NOT_OWNER: u64 = 2;
@@ -146,6 +147,9 @@ module sellable_token_objects::instant_sale {
         let linear_transfer = components_common::generate_linear_transfer_ref(option::borrow(&transfer_config.transfer_key));
         object::transfer_with_ref(linear_transfer, buyer_addr);
         coin::deposit(owner, coin);
+
+        token_objects_store::update(owner, object);
+        token_objects_store::update(buyer_addr, object);
     }
 
     #[test_only]
@@ -195,6 +199,8 @@ module sellable_token_objects::instant_sale {
         let obj_1 = object::object_from_constructor_ref(&cctor_1);
         let ex_1 = object::generate_extend_ref(&cctor_1);
 
+        token_objects_store::register(account_1);
+        token_objects_store::register(account_2);
         init_for_coin_type<FreePizzaPass, FakeMoney>(&ex_1, obj_1, utf8(b"collection1"), utf8(b"name1"));
         (obj_1, ex_1, components_common::create_transfer_key(cctor_1))
     }
