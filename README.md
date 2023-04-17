@@ -1,5 +1,5 @@
 # sellable_token_objects
-instant sale component for token objects written in move.
+instant sale component prototype for token objects written in move.
 
 list of components  
 https://github.com/honehone12/components_common  
